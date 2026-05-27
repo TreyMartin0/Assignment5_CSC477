@@ -10,7 +10,9 @@
   },
   "dependencies": {
     "@observablehq/framework": "^1.13.4",
-    "arquero": "^8.0.3"
+    "arquero": "^8.0.3",
+    "topojson-client": "^3.1.0",
+    "us-atlas": "^3.0.1"
   },
   "devDependencies": {
     "rimraf": "^5.0.5"
