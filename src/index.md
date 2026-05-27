@@ -4,7 +4,7 @@ Do counties with data centers differ economically from their neighboring countie
 
 ```js
 // Data
-const counties = await FileAttachment("data/counties.json").json();
+const counties = await FileAttachment("data/data_prep.json").json();
 const us = await FileAttachment("data/counties-10m.json").json();
 ```
 

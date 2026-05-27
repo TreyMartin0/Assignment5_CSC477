@@ -10,7 +10,7 @@ const income = load("./IncomePerCapitaByYear@1.csv");
 const gdp = load("./county_gdp_summary.csv");
 const dc = load("./data_centers.csv");
 
-const years = Array.from({ length: 2024 - 2001 + 1}, (_, i) => 2001 + 1);
+const years = Array.from({ length: 2024 - 2001 + 1}, (_, i) => 2001 + i);
 
 //aggregate data centers to county level
 const dcByCounty = new Map();
