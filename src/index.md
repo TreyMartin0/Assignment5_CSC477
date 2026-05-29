@@ -9,9 +9,7 @@ import * as topojson from "npm:topojson-client";
 ```js
 const counties = await FileAttachment("data/data_prep.json").json();
 const us = await FileAttachment("data/counties-10m.json").json();
-```
 
-```js
 const countyByFips = new Map(counties.map((c) => [c.fips, c]));
 const countyFeatures = topojson.feature(us, us.objects.counties).features;
 const stateMesh = topojson.mesh(us, us.objects.states, (a, b) => a !== b);
@@ -38,20 +36,32 @@ const measure = view(Inputs.radio(
 
 ```js
 const measureValues = counties.map((c) => c[measure]).filter((v) => v > 0);
-const maxVal = d3.max(measureValues) ?? 1;
-const color = d3.scaleSequentialLog(d3.interpolateYlOrRd).domain([1, maxVal]).clamp(true);
+const isBinary = measure === "cancelled";
+const cancelledColor = "#c92a2a";
 
-// Tiny inline legend strip so viewers can interpret the colors.
+const maxVal = d3.max(measureValues) ?? 1;
+const color = isBinary
+  ? null
+  : d3.scaleSequentialLog(d3.interpolateYlOrRd).domain([1, maxVal]).clamp(true);
+
+// Legend: single swatch for binary (cancelled), gradient strip for everything else.
 const legendNode = (() => {
-  const w = 240, h = 12;
-  const svg = d3.create("svg").attr("width", w + 60).attr("height", h + 18);
-  const grad = svg.append("defs").append("linearGradient").attr("id", "leg-grad");
-  d3.range(0, 1.01, 0.1).forEach((t) => {
-    grad.append("stop").attr("offset", `${t * 100}%`).attr("stop-color", d3.interpolateYlOrRd(t));
-  });
-  svg.append("rect").attr("x", 0).attr("y", 0).attr("width", w).attr("height", h).attr("fill", "url(#leg-grad)");
-  svg.append("text").attr("x", 0).attr("y", h + 14).attr("font-size", 11).attr("fill", "#aaa").text("low");
-  svg.append("text").attr("x", w).attr("y", h + 14).attr("font-size", 11).attr("fill", "#aaa").attr("text-anchor", "end").text(`high (max ${maxVal.toLocaleString()})`);
+  const svg = d3.create("svg").attr("height", 30);
+  if (isBinary) {
+    svg.attr("width", 180);
+    svg.append("rect").attr("x", 0).attr("y", 0).attr("width", 14).attr("height", 14).attr("rx", 3).attr("fill", cancelledColor);
+    svg.append("text").attr("x", 20).attr("y", 11).attr("font-size", 11).attr("fill", "#aaa").text("Has cancelled facilities");
+  } else {
+    const w = 240, h = 12;
+    svg.attr("width", w + 60);
+    const grad = svg.append("defs").append("linearGradient").attr("id", "leg-grad");
+    d3.range(0, 1.01, 0.1).forEach((t) => {
+      grad.append("stop").attr("offset", `${t * 100}%`).attr("stop-color", d3.interpolateYlOrRd(t));
+    });
+    svg.append("rect").attr("x", 0).attr("y", 0).attr("width", w).attr("height", h).attr("fill", "url(#leg-grad)");
+    svg.append("text").attr("x", 0).attr("y", h + 14).attr("font-size", 11).attr("fill", "#aaa").text("low");
+    svg.append("text").attr("x", w).attr("y", h + 14).attr("font-size", 11).attr("fill", "#aaa").attr("text-anchor", "end").text(`high (max ${maxVal.toLocaleString()})`);
+  }
   return svg.node();
 })();
 display(legendNode);
@@ -78,7 +88,8 @@ svg.append("g")
     .attr("fill", (d) => {
       const rec = countyByFips.get(String(d.id).padStart(5, "0"));
       const v = rec ? rec[measure] : 0;
-      return v > 0 ? color(v) : "#f0f0f0";
+      if (v <= 0) return "#f0f0f0";
+      return isBinary ? cancelledColor : color(v);
     })
     .attr("stroke", "#fff")
     .attr("stroke-width", 0.2)
@@ -120,7 +131,7 @@ display(svg.node());
 const fmtMW = (n) => n == null ? "—" : `${Number(n).toLocaleString()} MW`;
 const fmtAcres = (n) => n == null ? null : `${Number(n).toLocaleString()} acres`;
 
-// Style helpers — kept inline so the page is self-contained.
+// Style helpers 
 const chipStyle = "display:inline-block; padding:4px 10px; margin:0 6px 6px 0; background:#1a1a1a; border:1px solid #333; border-radius:14px; font-size:0.85em;";
 const statusColor = (s) => {
   const x = (s || "").toLowerCase();
@@ -133,10 +144,35 @@ const statusColor = (s) => {
 };
 const statusBadge = (s) => html`<span style="display:inline-block; padding:2px 8px; border-radius:10px; font-size:0.78em; background:${statusColor(s)}; color:white;">${(s || "—").replace("Approved/Permitted/Under construction", "Under construction")}</span>`;
 
+
+const measureMeta = {
+  total:        { filter: null,        label: "Largest facility" },
+  mwTotal:      { filter: null,        label: "Highest-capacity facility" },
+  proposed:     { filter: "proposed",  label: "Largest proposed facility" },
+  operating:    { filter: "operating", label: "Largest operating facility" },
+  cancelled:    { filter: "cancel",    label: "Largest cancelled facility" },
+  pushbackCount:{ filter: "pushback",  label: "Contested facility" },
+};
+
+function pickSpotlight(facilities, measure) {
+  const meta = measureMeta[measure] ?? measureMeta.total;
+  let pool = facilities;
+  if (meta.filter === "pushback") {
+    pool = facilities.filter(f => f.pushback).sort((a, b) => {
+      const score = f => (f.advocacyInfo ? 2 : 0) + (f.resistanceStatus ? 1 : 0) + (f.sources?.length > 0 ? 1 : 0);
+      return score(b) - score(a) || (b.mw ?? 0) - (a.mw ?? 0);
+    });
+  } else if (meta.filter) {
+    pool = facilities.filter(f => f.status?.toLowerCase().includes(meta.filter));
+  }
+  if (!pool.length) pool = facilities;
+  return pool.slice().sort((a, b) => (b.mw ?? 0) - (a.mw ?? 0))[0] ?? null;
+}
+
 if (!selected) {
   display(html`<p style="color:#888;"><em>Hover any colored county for a quick read. Click a county to see operators and the spotlight facility.</em></p>`);
 } else {
-  const sp = selected.spotlight;
+  const sp = pickSpotlight(selected.facilities, measure);
   const ops = selected.operators.filter((o) => o.name !== "Unknown").slice(0, 6);
   const unknownGroup = selected.operators.find((o) => o.name === "Unknown");
   const namedCount = selected.operators.filter((o) => o.name !== "Unknown").length;
@@ -169,7 +205,7 @@ if (!selected) {
           ${/* Header bar */""}
           <div style="padding:10px 16px; background:${sp.pushback ? "#1a0505" : "#111"}; border-bottom:1px solid ${sp.pushback ? "#c92a2a" : "#222"}; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
             <span style="font-size:0.7em; font-weight:600; text-transform:uppercase; letter-spacing:0.08em; color:${sp.pushback ? "#ff6b6b" : "#666"};">
-              ${sp.pushback ? "⚑ Contested facility" : "Largest facility"}
+              ${sp.pushback ? "⚑ " : ""}${measureMeta[measure]?.label ?? "Spotlight"}
             </span>
             ${statusBadge(sp.status)}
           </div>
@@ -237,3 +273,31 @@ if (!selected) {
   `);
 }
 ```
+
+## Design Rationale
+I first began this assignment with a different focus: do data center counties grow economically differently from their neighbors. After making a version of this, I found that my data had too little information to make any claims about my findings. Rather than making a claim I couldn't defend honestly, I decided to move to a more concrete question: where is the buildout happening, who is running it, and where are communities pushing back? I chose this so that every measure is a counted fact and not an inferred effect.
+
+The quesiton I ask is pretty spatial, so I decide to go with a choropleth as my view. Counties were colored on a sequential ramp with a logarithmic scale. I made this decision because some counties, like Loudoun, VA and Pike, OH dominate the distribution and would saturate a linear scale. The zero-value counties were rendered light gray to seperate them from the counties with low facility counts.
+
+The radio button toggle is a main interaction. They allow the viewer to switch between total facilities, total megawatts, proposed, operating, cancelled, and community pushback turn othe map into six views and shows interesting comparisons in the data. For example, the densest counties are not alwasy the largest in raw power, and the pushback hotspots are in a different geography from facilties count hotspots.
+
+The click-to-detail panel saw various iterations. My early version lsited every facility as a table row, which would overwhelm the viewer for big counties. I tried collapsing by faciltiy name, but found duplicated that were actually distinct facilites at different addresses sharing a project name. The final verison I landed on was groups by operator and using a spotlight card to give one facility deep treatment rather than spreading attention across many.
+
+The pushback field also saw some iteration. The "pushback count" alone was abstract and didn't give a viewer any information as to why. The dataset also didn't have a "reason" field, but does include evidence fields: advocacy descriptions, resistance status, NDA flags, petition URLs, and news sources. The spotlight card displays these when present.
+
+Encoding channels are kept seperate: color encodes the chosen measure, a black outline marks the selected county, and the detail panel uses a categorical palette for status.
+
+## References / Data Sources 
+
+U.S data center facility records (data_centers.csv) - https://data.msdlive.org/records/65g71-a4731
+
+FracTracker Alliance, National Data Centers Tracker. (datacenter2.csv) - https://www.fractracker.org/2025/07/national-data-centers-tracker/
+
+Frontier AI data center construction observations (datacenters3.csv) - https://epoch.ai/data/data-centers
+
+County boundary geometry — us-atlas (https://github.com/topojson/us-atlas)
+
+Github Repository - https://github.com/TreyMartin0/Assignment5_CSC477
+
+*There is two additional dataset in the repository that are not used, but I can provide links upon request if needed*
+
