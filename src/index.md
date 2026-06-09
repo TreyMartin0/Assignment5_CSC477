@@ -40,10 +40,10 @@ const measure = view(Inputs.radio(
 const measureUnits = {
   total:         "facilities",
   mwTotal:       "MW",
-  proposed:      "proposed",
-  operating:     "operating",
+  proposed:      "proposed centers",
+  operating:     "operating centers",
   cancelled:     null,
-  pushbackCount: "pushback",
+  pushbackCount: "pushback count",
 };
 
 const noDataColor = "#9db5c2";   // blue-grey — visually distinct from YlOrRd
